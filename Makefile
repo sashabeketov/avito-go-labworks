@@ -1,7 +1,7 @@
 include .env
 export
 
-.PHONY: run, generate
+.PHONY: run generate
 
 run:
 	go run ./cmd/trip-service
