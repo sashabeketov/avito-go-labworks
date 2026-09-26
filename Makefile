@@ -1,3 +1,4 @@
+include .env.example
 include .env
 export
 
