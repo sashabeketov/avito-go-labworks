@@ -2,7 +2,8 @@ include .env.example
 include .env
 export
 
-.PHONY: run generate migrate-up migrate-down migrate-status
+.PHONY: run generate migrate-down migrate-status migrate
+migrate: migrate-up
 
 run:
 	go run ./cmd/trip-service
