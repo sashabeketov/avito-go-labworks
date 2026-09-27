@@ -2,7 +2,7 @@ include .env.example
 include .env
 export
 
-.PHONY: run generate
+.PHONY: run generate migrate-up migrate-down migrate-status
 
 run:
 	go run ./cmd/trip-service
@@ -14,3 +14,12 @@ generate:
      		-package api \
      		-o internal/generated/api.gen.go \
      		contracts/openapi/trip-service.openapi.yaml
+
+migrate-up:
+	go tool goose -dir migrations postgres "$(DATABASE_URL)" up
+
+migrate-down:
+	go tool goose -dir migrations postgres "$(DATABASE_URL)" down
+
+migrate-status:
+	go tool goose -dir migrations postgres "$(DATABASE_URL)" status
