@@ -2,8 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/sashabeketov/avito-go-labworks/internal/config"
@@ -16,9 +21,12 @@ import (
 )
 
 func main() {
-	err := run(context.Background())
-	if err != nil {
-		fmt.Println(err)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := run(ctx); err != nil {
+		slog.Error("trip service stopped", "error", err)
+		os.Exit(1)
 	}
 }
 
@@ -55,14 +63,42 @@ func run(ctx context.Context) error {
 	})
 
 	server := &http.Server{
-		Addr:    cfg.HTTP.Addr,
-		Handler: router,
+		Addr:              cfg.HTTP.Addr,
+		Handler:           router,
+		ReadTimeout:       cfg.HTTP.ReadTimeout,
+		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
+		WriteTimeout:      cfg.HTTP.WriteTimeout,
+		IdleTimeout:       cfg.HTTP.IdleTimeout,
 	}
 
-	if err := server.ListenAndServe(); err != nil {
+	serveErr := make(chan error, 1)
+	go func() {
+		serveErr <- server.ListenAndServe()
+	}()
+
+	select {
+	case err := <-serveErr:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
 		return fmt.Errorf("HTTP server: %w", err)
-	}
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(
+			context.WithoutCancel(ctx),
+			cfg.App.ShutdownTimeout,
+		)
+		defer cancel()
 
-	fmt.Println("NICE")
-	return nil
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			return errors.Join(
+				fmt.Errorf("shutdown HTTP server: %w", err),
+				server.Close(),
+			)
+		}
+
+		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("HTTP server: %w", err)
+		}
+		return nil
+	}
 }
