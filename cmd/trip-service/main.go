@@ -10,6 +10,8 @@ import (
 	httpcontroller "github.com/sashabeketov/avito-go-labworks/internal/controller/http"
 	api "github.com/sashabeketov/avito-go-labworks/internal/generated"
 	"github.com/sashabeketov/avito-go-labworks/internal/readiness"
+	postgresrepo "github.com/sashabeketov/avito-go-labworks/internal/repository/postgres"
+	"github.com/sashabeketov/avito-go-labworks/internal/service"
 	"github.com/sashabeketov/avito-go-labworks/internal/storage/postgres"
 )
 
@@ -38,11 +40,19 @@ func run(ctx context.Context) error {
 
 	readyAll := readiness.CreateReadinessCheckers(postgresChecker)
 
-	handler := httpcontroller.NewHandler(readyAll)
+	tripRepository := postgresrepo.NewTripRepository(pool, cfg.Database.QueryTimeout)
+	historyRepository := postgresrepo.NewTripStatusHistoryRepository(pool, cfg.Database.QueryTimeout)
+	txManager := postgresrepo.NewTxManager(pool, cfg.Database.QueryTimeout)
+	tripService := service.NewTripService(tripRepository, historyRepository, txManager)
+
+	handler := httpcontroller.NewHandler(readyAll, tripService)
 
 	router := chi.NewRouter()
 
-	api.HandlerFromMux(handler, router)
+	api.HandlerWithOptions(handler, api.ChiServerOptions{
+		BaseRouter:       router,
+		ErrorHandlerFunc: httpcontroller.WriteParameterError,
+	})
 
 	server := &http.Server{
 		Addr:    cfg.HTTP.Addr,

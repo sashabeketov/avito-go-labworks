@@ -109,7 +109,7 @@ func (r *TripRepository) GetByID(
 			"updated_at",
 		).
 		From("trips").
-		Where(sq.Eq{"id": id}).
+		Where("id = ?", id).
 		PlaceholderFormat(sq.Dollar).
 		ToSql()
 	if err != nil {
@@ -151,10 +151,8 @@ func (r *TripRepository) Finish(
 		Set("status", vobject.TripStatusCompleted).
 		Set("finished_at", finishedAt).
 		Set("updated_at", finishedAt).
-		Where(sq.Eq{
-			"id":     id,
-			"status": vobject.TripStatusActive,
-		}).
+		Where("id = ?", id).
+		Where(sq.Eq{"status": vobject.TripStatusActive}).
 		Suffix(`
 			RETURNING
 				id,
