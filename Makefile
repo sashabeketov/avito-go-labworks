@@ -17,10 +17,10 @@ generate:
      		contracts/openapi/trip-service.openapi.yaml
 
 migrate-up:
-	go tool goose -dir migrations postgres "$(DATABASE_URL)" up
+	go tool goose -dir migrations "$(GOOSE_DRIVER)" "$(DATABASE_URL)" up
 
 migrate-down:
-	go tool goose -dir migrations postgres "$(DATABASE_URL)" down
+	go tool goose -dir migrations "$(GOOSE_DRIVER)" "$(DATABASE_URL)" down
 
 migrate-status:
-	go tool goose -dir migrations postgres "$(DATABASE_URL)" status
+	go tool goose -dir migrations "$(GOOSE_DRIVER)" "$(DATABASE_URL)" status
