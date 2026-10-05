@@ -1,45 +1,32 @@
 package config
 
 import (
-	"strings"
 	"time"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type HTTPConfig struct {
-	Addr              string
-	ReadTimeout       time.Duration
-	ReadHeaderTimeout time.Duration
-	WriteTimeout      time.Duration
-	IdleTimeout       time.Duration
+	Addr              string        `env:"HTTP_ADDR" evn-required:"true" validate:"required,hostname_port"`
+	ReadTimeout       time.Duration `env:"HTTP_READ_TIMEOUT" evn-required:"true" validate:"required,gt=0"`
+	ReadHeaderTimeout time.Duration `env:"HTTP_READ_HEADER_TIMEOUT" evn-required:"true" validate:"required,gt=0"`
+	WriteTimeout      time.Duration `env:"HTTP_WRITE_TIMEOUT" evn-required:"true" validate:"required,gt=0"`
+	IdleTimeout       time.Duration `env:"HTTP_IDLE_TIMEOUT" evn-required:"true" validate:"required,gt=0"`
 }
 
 func loadHTTP() (HTTPConfig, error) {
-	addr, err := requireEnv("HTTP_ADDR")
-	if err != nil {
-		return HTTPConfig{}, err
-	}
-	readTimeout, err := requireDuration("HTTP_READ_TIMEOUT")
-	if err != nil {
-		return HTTPConfig{}, err
-	}
-	readHeaderTimeout, err := requireDuration("HTTP_READ_HEADER_TIMEOUT")
-	if err != nil {
-		return HTTPConfig{}, err
-	}
-	writeTimeout, err := requireDuration("HTTP_WRITE_TIMEOUT")
-	if err != nil {
-		return HTTPConfig{}, err
-	}
-	idleTimeout, err := requireDuration("HTTP_IDLE_TIMEOUT")
+	var httpConfig HTTPConfig
+
+	err := cleanenv.ReadEnv(&httpConfig)
+
 	if err != nil {
 		return HTTPConfig{}, err
 	}
 
-	return HTTPConfig{
-		Addr:              strings.TrimSpace(addr),
-		ReadTimeout:       readTimeout,
-		ReadHeaderTimeout: readHeaderTimeout,
-		WriteTimeout:      writeTimeout,
-		IdleTimeout:       idleTimeout,
-	}, nil
+	err = validate.Struct(httpConfig)
+	if err != nil {
+		return HTTPConfig{}, err
+	}
+
+	return httpConfig, nil
 }

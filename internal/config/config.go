@@ -1,11 +1,7 @@
 package config
 
 import (
-	"errors"
-	"os"
-	"strconv"
-	"strings"
-	"time"
+	"github.com/go-playground/validator/v10"
 )
 
 type Config struct {
@@ -15,7 +11,10 @@ type Config struct {
 	App      AppConfig
 }
 
+var validate *validator.Validate
+
 func LoadConfig() (Config, error) {
+	validate = validator.New()
 	http, err := loadHTTP()
 
 	if err != nil {
@@ -46,61 +45,4 @@ func LoadConfig() (Config, error) {
 		Log:      log,
 		App:      app,
 	}, nil
-}
-
-func requireInt(key string) (int, error) {
-	val, err := requireEnv(key)
-	if err != nil {
-		return 0, err
-	}
-
-	n, err := strconv.Atoi(val)
-	if err != nil {
-		return 0, errors.New(key +
-			" : " +
-			"must be an integer")
-	}
-
-	if n < 0 {
-		return 0, errors.New(key +
-			" : " +
-			" must not be negative")
-	}
-
-	return n, nil
-}
-
-func requireDuration(key string) (time.Duration, error) {
-	val, err := requireEnv(key)
-
-	if err != nil {
-		return 0, err
-	}
-
-	duration, err := time.ParseDuration(val)
-
-	if err != nil {
-		return 0, errors.New(key +
-			" : " +
-			"invalid duration format (example: 10s)")
-	}
-
-	if duration <= 0 {
-		return 0, errors.New(key +
-			" : " +
-			"duration must be greater than zero (example: 10s)")
-	}
-
-	return duration, nil
-}
-
-func requireEnv(key string) (string, error) {
-	val, ok := os.LookupEnv(key)
-	val = strings.TrimSpace(val)
-
-	if !ok || val == "" {
-		return "", errors.New(key + " is required")
-	}
-
-	return val, nil
 }

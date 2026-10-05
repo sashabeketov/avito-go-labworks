@@ -2,20 +2,28 @@ package config
 
 import (
 	"time"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type AppConfig struct {
-	ShutdownTimeout time.Duration
+	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-required:"true" validate:"required,gt=0"`
 }
 
 func loadApp() (AppConfig, error) {
-	val, err := requireDuration("SHUTDOWN_TIMEOUT")
+	var appConfig AppConfig
+
+	err := cleanenv.ReadEnv(&appConfig)
 
 	if err != nil {
 		return AppConfig{}, err
 	}
 
-	return AppConfig{
-		ShutdownTimeout: val,
-	}, nil
+	err = validate.Struct(appConfig)
+
+	if err != nil {
+		return AppConfig{}, err
+	}
+
+	return appConfig, nil
 }

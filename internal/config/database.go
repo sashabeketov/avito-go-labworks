@@ -1,71 +1,40 @@
 package config
 
 import (
-	"errors"
+	"fmt"
 	"time"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type DBConfig struct {
-	DatabaseURL     string
-	MaxConns        int
-	MinConns        int
-	MaxConnLifetime time.Duration
-	ConnectTimeout  time.Duration
-	QueryTimeout    time.Duration
-	PingTimeout     time.Duration
+	DatabaseURL     string        `env:"DATABASE_URL" env-required:"true" validate:"required,url"`
+	MaxConns        int           `env:"DATABASE_MAX_CONNS" env-required:"true" validate:"required,gt=0"`
+	MinConns        int           `env:"DATABASE_MIN_CONNS" env-required:"true" validate:"required,gte=0"`
+	MaxConnLifetime time.Duration `env:"DATABASE_MAX_CONN_LIFETIME" env-required:"true" validate:"required,gt=0"`
+	ConnectTimeout  time.Duration `env:"DATABASE_CONNECT_TIMEOUT" env-required:"true" validate:"required,gt=0"`
+	QueryTimeout    time.Duration `env:"DATABASE_QUERY_TIMEOUT" env-required:"true" validate:"required,gt=0"`
+	PingTimeout     time.Duration `env:"DATABASE_PING_TIMEOUT" env-required:"true" validate:"required,gt=0"`
 }
 
 func loadDB() (DBConfig, error) {
-	url, err := requireEnv("DATABASE_URL")
+	var dbConfig DBConfig
+
+	err := cleanenv.ReadEnv(&dbConfig)
+
 	if err != nil {
 		return DBConfig{}, err
 	}
 
-	maxConns, err := requireInt("DATABASE_MAX_CONNS")
+	err = validate.Struct(dbConfig)
+
 	if err != nil {
 		return DBConfig{}, err
 	}
 
-	minConns, err := requireInt("DATABASE_MIN_CONNS")
-	if err != nil {
-		return DBConfig{}, err
+	if dbConfig.MinConns > dbConfig.MaxConns {
+		return DBConfig{}, fmt.Errorf("MaxConns must be greater than MinConns")
 	}
 
-	if maxConns == 0 {
-		return DBConfig{}, errors.New("max connections must be grater than zero")
-	}
-
-	if minConns > maxConns {
-		return DBConfig{}, errors.New("min connections must be lower than max connections now")
-	}
-
-	maxLifetime, err := requireDuration("DATABASE_MAX_CONN_LIFETIME")
-	if err != nil {
-		return DBConfig{}, err
-	}
-
-	connectTimeout, err := requireDuration("DATABASE_CONNECT_TIMEOUT")
-	if err != nil {
-		return DBConfig{}, err
-	}
-
-	queryTimeout, err := requireDuration("DATABASE_QUERY_TIMEOUT")
-	if err != nil {
-		return DBConfig{}, err
-	}
-
-	pingTimeout, err := requireDuration("DATABASE_PING_TIMEOUT")
-	if err != nil {
-		return DBConfig{}, err
-	}
-
-	return DBConfig{
-		DatabaseURL:     url,
-		MaxConns:        maxConns,
-		MinConns:        minConns,
-		MaxConnLifetime: maxLifetime,
-		ConnectTimeout:  connectTimeout,
-		QueryTimeout:    queryTimeout,
-		PingTimeout:     pingTimeout,
-	}, nil
+	return dbConfig, nil
 }
