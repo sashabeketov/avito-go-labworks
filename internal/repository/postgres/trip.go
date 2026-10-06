@@ -16,7 +16,7 @@ import (
 	"github.com/sashabeketov/avito-go-labworks/internal/repository/postgres/mapper"
 )
 
-type TripRepository struct {
+type tripRepository struct {
 	pool         *pgxpool.Pool
 	queryTimeout time.Duration
 }
@@ -24,14 +24,14 @@ type TripRepository struct {
 func NewTripRepository(
 	pool *pgxpool.Pool,
 	queryTimeout time.Duration,
-) *TripRepository {
-	return &TripRepository{
+) *tripRepository {
+	return &tripRepository{
 		pool:         pool,
 		queryTimeout: queryTimeout,
 	}
 }
 
-func (r *TripRepository) Create(
+func (r *tripRepository) Create(
 	ctx context.Context,
 	trip domain.Trip,
 ) error {
@@ -88,7 +88,7 @@ func (r *TripRepository) Create(
 	return nil
 }
 
-func (r *TripRepository) GetByID(
+func (r *tripRepository) GetByID(
 	ctx context.Context,
 	id uuid.UUID,
 ) (domain.Trip, error) {
@@ -141,7 +141,7 @@ func (r *TripRepository) GetByID(
 	return trip, nil
 }
 
-func (r *TripRepository) Finish(
+func (r *tripRepository) Finish(
 	ctx context.Context,
 	id uuid.UUID,
 	finishedAt time.Time,
