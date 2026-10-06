@@ -1,7 +1,6 @@
 package http
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"mime"
@@ -19,53 +18,57 @@ func (h *Handler) CreateTrip(
 	_ api.CreateTripParams,
 ) {
 	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+
 	if err != nil || mediaType != "application/json" {
 		writeInvalidRequest(w, r)
 		return
 	}
 
-	var raw json.RawMessage
+	var req createTripRequest
+
 	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&raw); err != nil {
+	decoder.DisallowUnknownFields()
+
+	err = decoder.Decode(&req)
+	if err != nil {
 		writeInvalidRequest(w, r)
 		return
 	}
 
-	var extra json.RawMessage
-	if err := decoder.Decode(&extra); err != io.EOF {
+	err = validate.Struct(req)
+	if err != nil {
+		writeInvalidRequest(w, r)
+	}
+
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		writeInvalidRequest(w, r)
 		return
 	}
 
-	fields, ok := requiredFields(raw, "user_id", "driver_id", "start_point", "end_point", "price")
-	if !ok {
+	startPoint, err := vobject.NewCoordinates(
+		req.StartPoint.Latitude,
+		req.StartPoint.Longitude)
+
+	if err != nil {
 		writeInvalidRequest(w, r)
 		return
 	}
 
-	if _, ok := requiredFields(fields["start_point"], "latitude", "longitude"); !ok {
-		writeInvalidRequest(w, r)
-		return
-	}
-	if _, ok := requiredFields(fields["end_point"], "latitude", "longitude"); !ok {
-		writeInvalidRequest(w, r)
-		return
-	}
+	endPoint, err := vobject.NewCoordinates(
+		req.EndPoint.Latitude,
+		req.EndPoint.Longitude)
 
-	var body api.TripData
-	strictDecoder := json.NewDecoder(bytes.NewReader(raw))
-	strictDecoder.DisallowUnknownFields()
-	if err := strictDecoder.Decode(&body); err != nil {
+	if err != nil {
 		writeInvalidRequest(w, r)
 		return
 	}
 
 	input := service.CreateTripInput{
-		UserID:     uuid.UUID(body.UserId),
-		DriverID:   uuid.UUID(body.DriverId),
-		StartPoint: vobject.Coordinates{Latitude: body.StartPoint.Latitude, Longitude: body.StartPoint.Longitude},
-		EndPoint:   vobject.Coordinates{Latitude: body.EndPoint.Latitude, Longitude: body.EndPoint.Longitude},
-		Price:      body.Price,
+		UserID:     req.UserID,
+		DriverID:   req.DriverID,
+		StartPoint: startPoint,
+		EndPoint:   endPoint,
+		Price:      req.Price,
 	}
 
 	trip, err := h.tripService.Create(r.Context(), input)
@@ -77,18 +80,15 @@ func (h *Handler) CreateTrip(
 	writeTrip(w, r, http.StatusCreated, trip)
 }
 
-func requiredFields(raw json.RawMessage, names ...string) (map[string]json.RawMessage, bool) {
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
-		return nil, false
-	}
+type createTripRequest struct {
+	UserID     uuid.UUID   `json:"user_id" validate:"required,uuid"`
+	DriverID   uuid.UUID   `json:"driver_id" validate:"required,uuid"`
+	StartPoint coordinates `json:"start_point" validate:"required"`
+	EndPoint   coordinates `json:"end_point" validate:"required"`
+	Price      int64       `json:"price" validate:"required,gte=0"`
+}
 
-	for _, name := range names {
-		value, ok := fields[name]
-		if !ok || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
-			return nil, false
-		}
-	}
-
-	return fields, true
+type coordinates struct {
+	Latitude  float64 `json:"latitude" validate:"required,gte=-90,lte=90"`
+	Longitude float64 `json:"longitude" validate:"required,gte=-180,lte=180"`
 }

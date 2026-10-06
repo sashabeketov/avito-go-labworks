@@ -4,6 +4,7 @@ import (
 	"context"
 	"uuid"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/sashabeketov/avito-go-labworks/internal/domain"
 	api "github.com/sashabeketov/avito-go-labworks/internal/generated"
 	"github.com/sashabeketov/avito-go-labworks/internal/service"
@@ -19,6 +20,8 @@ type ReadinessChecker interface {
 	CheckAll(ctx context.Context) error
 }
 
+var validate *validator.Validate
+
 type Handler struct {
 	api.Unimplemented
 
@@ -31,6 +34,7 @@ func NewHandler(
 	readiness ReadinessChecker,
 	tripService TripService,
 ) *Handler {
+	validate = validator.New()
 	return &Handler{
 		readiness:   readiness,
 		tripService: tripService,
