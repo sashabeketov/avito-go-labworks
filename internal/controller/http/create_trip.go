@@ -38,6 +38,7 @@ func (h *Handler) CreateTrip(
 	err = validate.Struct(req)
 	if err != nil {
 		writeInvalidRequest(w, r)
+		return
 	}
 
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
