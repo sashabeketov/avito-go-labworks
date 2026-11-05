@@ -1,0 +1,305 @@
+{
+  "info": {
+    "_postman_id": "a318f571-badd-4d91-b689-31140fb83a25",
+    "name": "TripGo — лабораторная 1",
+    "description": "Запустите сервис и примените миграции. Выберите environment «TripGo Local». Для полного сценария выполните запросы по порядку сверху вниз. После создания поездки trip_id сохраняется автоматически. Если повторный запуск начался с 409 driver_busy, смените driver_id в environment или завершите оставшуюся активную поездку.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Основной сценарий",
+      "item": [
+        {
+          "name": "01 · Health",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/health",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Сервис работает\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "02 · Ready",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/ready",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PostgreSQL доступен\", () => pm.expect(pm.response.json().status).to.eql(\"ok\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "03 · Создать поездку",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/trips",
+            "description": "Сохраняет id новой поездки в переменную trip_id.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"driver_id\": \"{{driver_id}}\",\n  \"start_point\": {\n    \"latitude\": 59.9398,\n    \"longitude\": 30.3146\n  },\n  \"end_point\": {\n    \"latitude\": 59.929,\n    \"longitude\": 30.3626\n  },\n  \"price\": 1450\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 201\", () => pm.response.to.have.status(201));",
+                  "pm.test(\"Поездка создана\", () => {",
+                  "  const trip = pm.response.json();",
+                  "  pm.expect(trip.id).to.be.a(\"string\");",
+                  "  pm.expect(trip.status).to.eql(\"active\");",
+                  "  pm.expect(pm.response.headers.get(\"Location\")).to.eql(\"/api/v1/trips/\" + trip.id);",
+                  "});",
+                  "if (pm.response.code === 201) pm.environment.set(\"trip_id\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "04 · Получить поездку",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/trips/{{trip_id}}",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Получена нужная поездка\", () => {",
+                  "  const trip = pm.response.json();",
+                  "  pm.expect(trip.id).to.eql(pm.environment.get(\"trip_id\"));",
+                  "  pm.expect(trip.status).to.eql(\"active\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "05 · Занятый водитель",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/trips",
+            "description": "Выполните после создания и до завершения поездки: у того же водителя уже есть активная поездка.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"driver_id\": \"{{driver_id}}\",\n  \"start_point\": {\n    \"latitude\": 59.9398,\n    \"longitude\": 30.3146\n  },\n  \"end_point\": {\n    \"latitude\": 59.929,\n    \"longitude\": 30.3626\n  },\n  \"price\": 1450\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Problem JSON и код ошибки\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  "  const problem = pm.response.json();",
+                  "  pm.expect(problem.status).to.eql(409);",
+                  "  pm.expect(problem.code).to.eql(\"driver_busy\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "06 · Завершить поездку",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/trips/{{trip_id}}/finish",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"Поездка завершена\", () => {",
+                  "  const trip = pm.response.json();",
+                  "  pm.expect(trip.id).to.eql(pm.environment.get(\"trip_id\"));",
+                  "  pm.expect(trip.status).to.eql(\"completed\");",
+                  "  pm.expect(trip.finished_at).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "07 · Повторное завершение",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/trips/{{trip_id}}/finish",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"Problem JSON и код ошибки\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  "  const problem = pm.response.json();",
+                  "  pm.expect(problem.status).to.eql(409);",
+                  "  pm.expect(problem.code).to.eql(\"trip_completed\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Ошибки запроса",
+      "item": [
+        {
+          "name": "Неверный UUID поездки",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/trips/not-a-uuid",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Problem JSON и код ошибки\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  "  const problem = pm.response.json();",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.code).to.eql(\"invalid_request\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Несуществующая поездка",
+          "request": {
+            "method": "GET",
+            "url": "{{base_url}}/api/v1/trips/00000000-0000-4000-8000-000000000001",
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"Problem JSON и код ошибки\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  "  const problem = pm.response.json();",
+                  "  pm.expect(problem.status).to.eql(404);",
+                  "  pm.expect(problem.code).to.eql(\"trip_not_found\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Нет обязательного поля price",
+          "request": {
+            "method": "POST",
+            "url": "{{base_url}}/api/v1/trips",
+            "description": "",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"driver_id\": \"{{driver_id}}\",\n  \"start_point\": {\n    \"latitude\": 59.9398,\n    \"longitude\": 30.3146\n  },\n  \"end_point\": {\n    \"latitude\": 59.929,\n    \"longitude\": 30.3626\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"HTTP 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"Problem JSON и код ошибки\", () => {",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/problem+json\");",
+                  "  const problem = pm.response.json();",
+                  "  pm.expect(problem.status).to.eql(400);",
+                  "  pm.expect(problem.code).to.eql(\"invalid_request\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
