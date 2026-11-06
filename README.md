@@ -1,6 +1,6 @@
 # TripGo — Trip Service
 
-Реализация лабораторной работы 1: HTTP API поездок и PostgreSQL. Сервис создаёт поездку, возвращает её по ID и завершает. Контракт API находится в [`contracts/openapi/trip-service.openapi.yaml`](contracts/openapi/trip-service.openapi.yaml).
+HTTP API поездок и PostgreSQL из лабораторной работы 1; структура кода переносится на слои лабораторной работы 2. Сервис создаёт поездку, возвращает её по ID и завершает. Контракт API находится в [`contracts/openapi/trip-service.openapi.yaml`](contracts/openapi/trip-service.openapi.yaml).
 
 ## Требования
 
@@ -42,7 +42,10 @@ curl -i http://localhost:8080/ready
 | `make migrate-status` | Показать состояние миграций |
 | `make migrate-down` | Откатить одну миграцию |
 | `make generate` | Пересоздать код из OpenAPI |
-| `make test` | Запустить тесты с `-race` |
+| `make generate-mocks` | Пересоздать моки через `mockgen` |
+| `make test` | Unit- и HTTP-тесты с `-race`, показать покрытие домена и usecase |
+| `make test-integration` | Применить миграции и дважды выполнить тесты репозитория на PostgreSQL |
+| `make lint` | Проверить код линтерами и форматтерами |
 
 `make migrate-down` меняет схему и может удалить данные. Для проверки полного отката двух миграций используйте отдельную тестовую БД.
 
@@ -63,9 +66,9 @@ curl -i http://localhost:8080/ready
 | `DATABASE_QUERY_TIMEOUT` | Таймаут операций с БД |
 | `DATABASE_PING_TIMEOUT` | Таймаут проверки доступности БД |
 | `GOOSE_DRIVER` | Драйвер миграций (`postgres`) |
-| `LOG_LEVEL` | Уровень логирования; расширение логов запланировано в ЛР2 |
+| `LOG_LEVEL` | Уровень JSON-логов: `debug`, `info`, `warn` или `error` |
 
-`.env.example` также содержит переменные следующих лабораторных работ; текущий сервис их пока не использует.
+Переменные `OTEL_*` из `.env.example` задают имя сервиса, адрес коллектора, протокол `http/protobuf` и сэмплирование трейсов. `tripgoctl connect` записывает актуальный адрес коллектора в `.env`. Остальные переменные следующих лабораторных работ текущий сервис пока не использует.
 
 ## HTTP API
 
@@ -81,6 +84,17 @@ curl -i http://localhost:8080/ready
 
 ## Принятые решения
 
+### Архитектура
+
+- `internal/http/trip/{create,get,finish}` разбирает запросы и вызывает соответствующий usecase. `internal/http/router.go` связывает эти обработчики со сгенерированным OpenAPI-интерфейсом, а `internal/http/domainerror` переводит доменные ошибки в `Problem`.
+- `internal/usecase/trip/{create,get,finish}` содержит сценарии работы. Каждый пакет объявляет в своём `contract.go` только нужные ему интерфейсы репозиториев и менеджера транзакций.
+- `internal/domain/trip` хранит правила перехода статуса и доменные ошибки; `internal/model` содержит структуры данных, передаваемые между слоями. Домен не импортирует HTTP или PostgreSQL.
+- `internal/repository/trip` реализует SQL-запросы и объявляет минимальный интерфейс исполнителя в своём `contract.go`. `internal/infra/postgres` создаёт пул, а `internal/infra/postgres/transaction` управляет транзакциями и хранит текущую транзакцию в контексте.
+- `internal/container` создаёт конкретные реализации и соединяет их. `cmd/trip-service/main.go` читает конфигурацию, запускает сервер и завершает его по сигналу.
+- `internal/infra/telemetry` настраивает OpenTelemetry SDK и JSON-логгер. HTTP middleware идут в порядке `Recover → Tracing → Logging → Metrics`; `otelpgx` создаёт спаны запросов PostgreSQL, а измеритель рядом с пулом записывает длительность с именами операций и таблиц. Usecase сообщает об успешном создании и завершении поездки через узкий интерфейс.
+
+Доменный `Trip.Finish` проверяет переход `active → completed`; условный `UPDATE` в репозитории повторно проверяет статус в PostgreSQL, чтобы два конкурентных запроса не завершили одну поездку дважды. Часы и генератор UUID передаются в usecase как зависимости, чтобы позднее проверять их детерминированно.
+
 **Транзакции.** `TxManager.Do` начинает транзакцию, помещает её в `context.Context` и передаёт контекст функции. Репозитории берут исполнитель из контекста: при наличии транзакции используют её, иначе пул. Бизнес-код не зависит от `pgx`. Успешный вызов завершается `COMMIT`, ошибка или паника — `ROLLBACK`; вложенный `Do` переиспользует текущую транзакцию. Создание поездки записывает `trips` и `trip_status_history` внутри одного `Do`.
 
 **Изоляция.** Выбран `Read Committed`. Для этих операций не нужна более строгая изоляция: запрет двух активных поездок закреплён уникальным индексом БД, а завершение выполняется условным `UPDATE`. После безрезультатного `UPDATE` повторное чтение различает отсутствующую и уже завершённую поездку.
@@ -93,11 +107,38 @@ curl -i http://localhost:8080/ready
 
 ```bash
 go build ./...
+make lint
 make test
 make migrate-status
 make generate
 ```
 
 Для проверки бизнес-правил: повторите создание с тем же `driver_id` до завершения первой поездки — ожидается `409 driver_busy`; завершите поездку дважды — `200`, затем `409 trip_completed`. При двадцати одновременных созданиях для одного водителя должна появиться одна поездка; при двух одновременных завершениях — один `200` и один `409`.
+
+Для проверки телеметрии выполните HTTP-запрос и откройте Jaeger и Grafana по адресам из `tripgoctl connect`. В Jaeger у HTTP-спана должны быть вложенные спаны PostgreSQL; `trace_id` из JSON-лога должен находить тот же трейс. В Prometheus/Grafana доступны `http_server_request_duration_seconds`, `db_client_operation_duration_seconds`, `tripgo_trips_created_total`, `tripgo_trips_completed_total` и `tripgo_trips_active`.
+
+### Тесты ЛР2
+
+`make test` не требует запущенной БД. Моки зависимостей usecase и HTTP-хендлеров генерируются из их `contract.go` командой `make generate-mocks`; сгенерированные `mocks_test.go` хранятся в репозитории. Покрытие `internal/domain` и `internal/usecase` печатается последней строкой.
+
+Для `make test-integration` сначала выполните `tripgoctl environment start` и `tripgoctl connect`. Команда применит миграции и запустит тесты с билд-тегом `integration` на реальной PostgreSQL. Каждый тест использует случайные UUID и удаляет свои записи после завершения; сценарий отката проверяет отсутствие строк в обеих таблицах.
+
+### Что смотреть в Grafana
+
+Откройте адрес Grafana из `tripgoctl connect` → **Explore** → источник **Prometheus** → режим **Code**, выберите диапазон **Last 1 hour** и выполните запрос. После новых HTTP-запросов полезны:
+
+```promql
+sum by (http_route, http_response_status_code) (http_server_request_duration_seconds_count)
+```
+
+```promql
+sum by (db_collection_name, db_operation_name) (db_client_operation_duration_seconds_count)
+```
+
+```promql
+tripgo_trips_created_total
+```
+
+Также проверьте `tripgo_trips_completed_total` и `tripgo_trips_active`. Для PR сделайте скриншот Explore с HTTP-метрикой и счётчиком поездок; в Jaeger отдельно покажите HTTP-спан с вложенным запросом PostgreSQL.
 
 Идемпотентность по `Idempotency-Key` и Dockerfile относятся к заданиям со звёздочкой и здесь не реализованы. Координаты, gRPC и события относятся к следующим лабораторным работам.

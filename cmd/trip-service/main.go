@@ -10,24 +10,24 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/sashabeketov/avito-go-labworks/internal/config"
-	httpcontroller "github.com/sashabeketov/avito-go-labworks/internal/controller/http"
-	api "github.com/sashabeketov/avito-go-labworks/internal/generated"
-	"github.com/sashabeketov/avito-go-labworks/internal/readiness"
-	postgresrepo "github.com/sashabeketov/avito-go-labworks/internal/repository/postgres"
-	"github.com/sashabeketov/avito-go-labworks/internal/service"
-	"github.com/sashabeketov/avito-go-labworks/internal/storage/postgres"
+	"github.com/sashabeketov/avito-go-labworks/internal/container"
 )
 
 func main() {
+	os.Exit(exitCode())
+}
+
+func exitCode() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	if err := run(ctx); err != nil {
 		slog.Error("trip service stopped", "error", err)
-		os.Exit(1)
+		return 1
 	}
+
+	return 0
 }
 
 func run(ctx context.Context) error {
@@ -36,41 +36,27 @@ func run(ctx context.Context) error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
-	pool, err := postgres.CreateNewPool(ctx, cfg.Database)
+	app, err := container.New(ctx, cfg)
 	if err != nil {
-		return fmt.Errorf("open PostgreSQL: %w", err)
+		return fmt.Errorf("build application: %w", err)
 	}
-	defer pool.Close()
-
-	postgresChecker := readiness.NewPostgresChecker(
-		pool,
-		cfg.Database.PingTimeout)
-
-	readyAll := readiness.CreateReadinessCheckers(postgresChecker)
-
-	tripRepository := postgresrepo.NewTripRepository(pool, cfg.Database.QueryTimeout)
-	historyRepository := postgresrepo.NewTripStatusHistoryRepository(pool, cfg.Database.QueryTimeout)
-	txManager := postgresrepo.NewTxManager(pool, cfg.Database.QueryTimeout)
-	tripService := service.NewTripService(tripRepository, historyRepository, txManager)
-
-	handler := httpcontroller.NewHandler(readyAll, tripService)
-
-	router := chi.NewRouter()
-
-	api.HandlerWithOptions(handler, api.ChiServerOptions{
-		BaseRouter:       router,
-		ErrorHandlerFunc: httpcontroller.WriteParameterError,
-	})
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.App.ShutdownTimeout)
+		defer cancel()
+		app.Logger.InfoContext(closeCtx, "service stopped")
+		app.Close(closeCtx)
+	}()
 
 	server := &http.Server{
 		Addr:              cfg.HTTP.Addr,
-		Handler:           router,
+		Handler:           app.Handler,
 		ReadTimeout:       cfg.HTTP.ReadTimeout,
 		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
 		WriteTimeout:      cfg.HTTP.WriteTimeout,
 		IdleTimeout:       cfg.HTTP.IdleTimeout,
 	}
 
+	app.Logger.InfoContext(ctx, "service starting", "addr", cfg.HTTP.Addr)
 	serveErr := make(chan error, 1)
 	go func() {
 		serveErr <- server.ListenAndServe()
