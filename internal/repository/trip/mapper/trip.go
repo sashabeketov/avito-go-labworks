@@ -27,10 +27,11 @@ func MapTrip(row rowScanner) (model.Trip, error) {
 		priceRaw  int64
 		statusRaw string
 
-		startedAt  time.Time
-		finishedAt *time.Time
-		createdAt  time.Time
-		updatedAt  time.Time
+		startedAt      time.Time
+		finishedAt     *time.Time
+		lastPositionAt *time.Time
+		createdAt      time.Time
+		updatedAt      time.Time
 	)
 
 	if err := row.Scan(
@@ -45,6 +46,7 @@ func MapTrip(row rowScanner) (model.Trip, error) {
 		&statusRaw,
 		&startedAt,
 		&finishedAt,
+		&lastPositionAt,
 		&createdAt,
 		&updatedAt,
 	); err != nil {
@@ -90,16 +92,17 @@ func MapTrip(row rowScanner) (model.Trip, error) {
 	}
 
 	return model.Trip{
-		ID:         id,
-		UserID:     userID,
-		DriverID:   driverID,
-		StartPoint: startPoint,
-		EndPoint:   endPoint,
-		Price:      price,
-		Status:     status,
-		StartedAt:  startedAt,
-		FinishedAt: finishedAt,
-		CreatedAt:  createdAt,
-		UpdatedAt:  updatedAt,
+		ID:             id,
+		UserID:         userID,
+		DriverID:       driverID,
+		StartPoint:     startPoint,
+		EndPoint:       endPoint,
+		Price:          price,
+		Status:         status,
+		StartedAt:      startedAt,
+		FinishedAt:     finishedAt,
+		LastPositionAt: lastPositionAt,
+		CreatedAt:      createdAt,
+		UpdatedAt:      updatedAt,
 	}, nil
 }

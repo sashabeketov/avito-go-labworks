@@ -1,6 +1,6 @@
 # TripGo — Trip Service
 
-HTTP API поездок и PostgreSQL из лабораторной работы 1; структура кода переносится на слои лабораторной работы 2. Сервис создаёт поездку, возвращает её по ID и завершает. Контракт API находится в [`contracts/openapi/trip-service.openapi.yaml`](contracts/openapi/trip-service.openapi.yaml).
+HTTP API поездок и координат на Go и PostgreSQL. Сервис создаёт поездку, возвращает её по ID, завершает и хранит точки маршрута. Контракт API находится в [`contracts/openapi/trip-service.openapi.yaml`](contracts/openapi/trip-service.openapi.yaml).
 
 ## Требования
 
@@ -41,7 +41,7 @@ curl -i http://localhost:8080/ready
 | `make migrate` | Применить все новые миграции |
 | `make migrate-status` | Показать состояние миграций |
 | `make migrate-down` | Откатить одну миграцию |
-| `make generate` | Пересоздать код из OpenAPI |
+| `make generate` | Пересоздать код из OpenAPI и моки |
 | `make generate-mocks` | Пересоздать моки через `mockgen` |
 | `make test` | Unit- и HTTP-тесты с `-race`, показать покрытие домена и usecase |
 | `make test-integration` | Применить миграции и дважды выполнить тесты репозитория на PostgreSQL |
@@ -68,7 +68,7 @@ curl -i http://localhost:8080/ready
 | `GOOSE_DRIVER` | Драйвер миграций (`postgres`) |
 | `LOG_LEVEL` | Уровень JSON-логов: `debug`, `info`, `warn` или `error` |
 
-Переменные `OTEL_*` из `.env.example` задают имя сервиса, адрес коллектора, протокол `http/protobuf` и сэмплирование трейсов. `tripgoctl connect` записывает актуальный адрес коллектора в `.env`. Остальные переменные следующих лабораторных работ текущий сервис пока не использует.
+Переменные `OTEL_*` из `.env.example` задают имя сервиса, адрес коллектора, протокол `http/protobuf` и сэмплирование трейсов. `tripgoctl connect` записывает актуальные адреса коллектора и Push Service в `.env`.
 
 ## HTTP API
 
@@ -77,6 +77,8 @@ curl -i http://localhost:8080/ready
 | `POST /api/v1/trips` | `201`, поездка и `Location` | `400 invalid_request`, `409 driver_busy`, `500 internal_error` |
 | `GET /api/v1/trips/{tripId}` | `200`, поездка | `400 invalid_request`, `404 trip_not_found`, `500 internal_error` |
 | `POST /api/v1/trips/{tripId}/finish` | `200`, завершённая поездка | `400 invalid_request`, `404 trip_not_found`, `409 trip_completed`, `500 internal_error` |
+| `POST /api/v1/trips/{tripId}/positions` | `201`, сохранённая координата | `400 invalid_request`, `404 trip_not_found`, `409 trip_completed`, `500 internal_error` |
+| `GET /api/v1/trips/{tripId}/positions` | `200`, точки маршрута | `400 invalid_request`, `404 trip_not_found`, `500 internal_error` |
 | `GET /health` | `200 {"status":"ok"}` | — |
 | `GET /ready` | `200 {"status":"ok"}` | `503 {"status":"unavailable"}` |
 
@@ -90,10 +92,17 @@ curl -i http://localhost:8080/ready
 - `internal/usecase/trip/{create,get,finish}` содержит сценарии работы. Каждый пакет объявляет в своём `contract.go` только нужные ему интерфейсы репозиториев и менеджера транзакций.
 - `internal/domain/trip` хранит правила перехода статуса и доменные ошибки; `internal/model` содержит структуры данных, передаваемые между слоями. Домен не импортирует HTTP или PostgreSQL.
 - `internal/repository/trip` реализует SQL-запросы и объявляет минимальный интерфейс исполнителя в своём `contract.go`. `internal/infra/postgres` создаёт пул, а `internal/infra/postgres/transaction` управляет транзакциями и хранит текущую транзакцию в контексте.
+- `internal/http/position/{create,list}` и `internal/usecase/position/{create,list}` обрабатывают координаты; `internal/repository/position` сохраняет точки и читает маршрут.
 - `internal/container` создаёт конкретные реализации и соединяет их. `cmd/trip-service/main.go` читает конфигурацию, запускает сервер и завершает его по сигналу.
 - `internal/infra/telemetry` настраивает OpenTelemetry SDK и JSON-логгер. HTTP middleware идут в порядке `Recover → Tracing → Logging → Metrics`; `otelpgx` создаёт спаны запросов PostgreSQL, а измеритель рядом с пулом записывает длительность с именами операций и таблиц. Usecase сообщает об успешном создании и завершении поездки через узкий интерфейс.
 
 Доменный `Trip.Finish` проверяет переход `active → completed`; условный `UPDATE` в репозитории повторно проверяет статус в PostgreSQL, чтобы два конкурентных запроса не завершили одну поездку дважды. Часы и генератор UUID передаются в usecase как зависимости, чтобы позднее проверять их детерминированно.
+
+### Координаты ЛР3
+
+`POST /positions` принимает точку только для активной поездки. В одной транзакции условный `UPDATE` блокирует строку поездки и обновляет `last_position_at` через `GREATEST`, затем `INSERT` сохраняет точку. Поэтому поздно пришедшая старая координата не уменьшает время последней точки, а ошибка вставки откатывает и обновление поездки. Точки маршрута возвращаются по `recorded_at`, затем по `id`; для существующей поездки без точек ответ содержит пустой массив.
+
+`recorded_at` обязателен и не может быть более чем на минуту в будущем. Широта и долгота проверяются по диапазонам контракта. Интеграционные тесты проверяют порядок, позднюю координату, ошибки отсутствующей и завершённой поездки и откат транзакции.
 
 **Транзакции.** `TxManager.Do` начинает транзакцию, помещает её в `context.Context` и передаёт контекст функции. Репозитории берут исполнитель из контекста: при наличии транзакции используют её, иначе пул. Бизнес-код не зависит от `pgx`. Успешный вызов завершается `COMMIT`, ошибка или паника — `ROLLBACK`; вложенный `Do` переиспользует текущую транзакцию. Создание поездки записывает `trips` и `trip_status_history` внутри одного `Do`.
 
@@ -101,7 +110,26 @@ curl -i http://localhost:8080/ready
 
 **Один активный заказ на водителя.** Частичный уникальный индекс `trips_one_active_per_driver_idx` действует только для строк со статусом `active`. PostgreSQL обеспечивает правило при параллельных запросах; нарушение индекса с кодом `23505` преобразуется в доменную ошибку, а HTTP-слой возвращает `409 driver_busy`.
 
-**Остановка.** По `SIGINT` или `SIGTERM` сервер прекращает принимать новые запросы и ждёт активные не дольше `SHUTDOWN_TIMEOUT`. Затем закрывается пул PostgreSQL. Ошибка запуска или остановки приводит к ненулевому коду выхода.
+**Остановка.** По `SIGINT` или `SIGTERM` HTTP, сканер и воркеры завершаются в рамках одного `SHUTDOWN_TIMEOUT`. Затем закрываются ресурсы. Ошибка запуска или остановки приводит к ненулевому коду выхода.
+
+## Опрос устаревших поездок
+
+`PostgreSQL → сканер → ограниченная FIFO-очередь → воркеры → Push Service`
+
+На каждом тике сканер выбирает активные поездки по времени последней координаты, а для поездок без точек берёт время старта. При полной очереди очередная постановка сразу получает `dropped` и пишет `Warn`. Поездка может попасть в выборку следующего тика. Пока задача в очереди или выполняется, повторная постановка получает `duplicate`.
+
+После коммита координаты отменяется ожидающая задача по этой поездке. Воркер пропускает её, когда читает канал. После обработки задача освобождает запись дедупликации. При остановке HTTP сначала заканчивает текущие запросы, сканер закрывает очередь, а воркеры дочитывают её в рамках общего `SHUTDOWN_TIMEOUT`.
+
+| Переменная | Значение по умолчанию | Назначение |
+|---|---|---|
+| `POSITION_CHECK_INTERVAL` | `30s` | Период обхода |
+| `POSITION_STALE_AFTER` | `60s` | Возраст координаты, после которого поездку опрашиваем |
+| `POSITION_WORKERS` | `4` | Число воркеров |
+| `POSITION_QUEUE_SIZE` | `100` | Буфер очереди |
+| `PUSH_HTTP_URL` | Адрес из `tripgoctl connect` | Базовый URL заглушки |
+| `PUSH_REQUEST_TIMEOUT` | `1s` | Таймаут вызова заглушки |
+
+Создайте активную поездку и дождитесь, когда сканер сочтёт её устаревшей. `tripgoctl environment logs push-service` покажет команду `REQUEST_POSITION`. В Grafana можно посмотреть `tripgo_stale_checks_total`, `tripgo_position_requests_queue_size` и `tripgo_position_requests_workers_active`.
 
 ## Проверка
 
@@ -141,4 +169,4 @@ tripgo_trips_created_total
 
 Также проверьте `tripgo_trips_completed_total` и `tripgo_trips_active`. Для PR сделайте скриншот Explore с HTTP-метрикой и счётчиком поездок; в Jaeger отдельно покажите HTTP-спан с вложенным запросом PostgreSQL.
 
-Идемпотентность по `Idempotency-Key` и Dockerfile относятся к заданиям со звёздочкой и здесь не реализованы. Координаты, gRPC и события относятся к следующим лабораторным работам.
+Идемпотентность по `Idempotency-Key` и Dockerfile относятся к заданиям со звёздочкой и здесь не реализованы. gRPC и события относятся к следующим лабораторным работам.

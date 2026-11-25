@@ -18,8 +18,9 @@ type Trip struct {
 	Price  vobject.Money
 	Status vobject.TripStatus
 
-	StartedAt  time.Time
-	FinishedAt *time.Time
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	LastPositionAt *time.Time
 
 	CreatedAt time.Time
 	UpdatedAt time.Time

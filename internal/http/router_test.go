@@ -61,6 +61,7 @@ func tripHandler(create *mockCreateUseCase, get *mockGetUseCase, finish *mockFin
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	handler, err := NewRouter(
 		createhttp.New(create, logger), gethttp.New(get, logger), finishhttp.New(finish, logger),
+		nil, nil,
 		health.New(nil), logger, otel.GetTracerProvider(), otel.GetMeterProvider(), propagation.TraceContext{},
 	)
 	if err != nil {
@@ -203,7 +204,7 @@ func TestTripErrors(t *testing.T) {
 func TestGetAndFinishTripResponses(t *testing.T) {
 	id := uuid.MustParse("1f0a9c62-4a1c-4f2e-9d33-2a4bb0f0b111")
 	finishedAt := time.Date(2026, time.August, 24, 12, 15, 0, 0, time.UTC)
-	trip := model.Trip{ID: id, Status: vobject.TripStatusCompleted, FinishedAt: &finishedAt}
+	trip := model.Trip{ID: id, Status: vobject.TripStatusCompleted, FinishedAt: &finishedAt, LastPositionAt: &finishedAt}
 	for _, tc := range []struct{ name, method, path, target string }{
 		{name: targetGet, method: http.MethodGet, path: "/api/v1/trips/" + id.String(), target: targetGet},
 		{name: targetFinish, method: http.MethodPost, path: "/api/v1/trips/" + id.String() + "/finish", target: targetFinish},
@@ -227,6 +228,8 @@ func TestGetAndFinishTripResponses(t *testing.T) {
 			require.Equal(t, api.Completed, response.Status)
 			require.NotNil(t, response.FinishedAt)
 			require.True(t, response.FinishedAt.Equal(finishedAt))
+			require.NotNil(t, response.LastPositionAt)
+			require.True(t, response.LastPositionAt.Equal(finishedAt))
 			getTrips.AssertExpectations(t)
 			finishTrips.AssertExpectations(t)
 		})
@@ -242,4 +245,15 @@ func checkProblem(t *testing.T, w *httptest.ResponseRecorder, status int, code s
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &problem))
 	require.Equal(t, code, problem.Code)
 	require.EqualValues(t, status, problem.Status)
+}
+
+func TestPositionRoutesRejectInvalidUUID(t *testing.T) {
+	for _, method := range []string{http.MethodPost, http.MethodGet} {
+		t.Run(method, func(t *testing.T) {
+			r := httptest.NewRequest(method, "/api/v1/trips/not-a-uuid/positions", nil)
+			w := httptest.NewRecorder()
+			tripHandler(nil, nil, nil).ServeHTTP(w, r)
+			checkProblem(t, w, http.StatusBadRequest, "invalid_request")
+		})
+	}
 }

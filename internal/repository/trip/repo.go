@@ -104,6 +104,7 @@ func (r *Repository) GetByID(
 			"status",
 			"started_at",
 			"finished_at",
+			"last_position_at",
 			"created_at",
 			"updated_at",
 		).
@@ -165,6 +166,7 @@ func (r *Repository) Finish(
 				status,
 				started_at,
 				finished_at,
+				last_position_at,
 				created_at,
 				updated_at
 		`).
