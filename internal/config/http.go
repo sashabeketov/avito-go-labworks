@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
@@ -14,11 +15,10 @@ type HTTPConfig struct {
 	IdleTimeout       time.Duration `env:"HTTP_IDLE_TIMEOUT" evn-required:"true" validate:"required,gt=0"`
 }
 
-func loadHTTP() (HTTPConfig, error) {
+func loadHTTP(validate *validator.Validate) (HTTPConfig, error) {
 	var httpConfig HTTPConfig
 
 	err := cleanenv.ReadEnv(&httpConfig)
-
 	if err != nil {
 		return HTTPConfig{}, err
 	}
