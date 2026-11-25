@@ -14,7 +14,7 @@ require-env:
 run: require-env
 	go run ./cmd/trip-service
 
-generate:
+generate: generate-mocks
 	mkdir -p internal/generated
 	go tool oapi-codegen \
 		-generate types,chi-server \
@@ -23,7 +23,8 @@ generate:
 		contracts/openapi/trip-service.openapi.yaml
 
 generate-mocks:
-	go generate ./internal/usecase/trip/... ./internal/http/trip/...
+	go generate ./internal/usecase/trip/... ./internal/http/trip/... ./internal/usecase/position/... ./internal/http/position/...
+	go generate ./internal/worker/positions/...
 
 test:
 	go test -race ./...
@@ -33,7 +34,7 @@ test:
 		go tool cover -func="$$coverage_file" | awk '/^total:/ { print "domain + usecase total coverage:", $$NF }'
 
 test-integration: require-env migrate-up
-	go test -race -tags=integration -count=2 ./internal/repository/trip/...
+	go test -race -tags=integration -count=2 ./internal/repository/trip/... ./internal/repository/position/...
 
 lint:
 	$(GOLANGCI_LINT) run ./...

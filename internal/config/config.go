@@ -1,6 +1,8 @@
 package config
 
 import (
+	"fmt"
+
 	"github.com/go-playground/validator/v10"
 )
 
@@ -10,6 +12,7 @@ type Config struct {
 	Log       LogConfig
 	App       AppConfig
 	Telemetry TelemetryConfig
+	Positions PositionsConfig
 }
 
 func LoadConfig() (Config, error) {
@@ -38,6 +41,10 @@ func LoadConfig() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	positions, err := loadPositions(validate)
+	if err != nil {
+		return Config{}, fmt.Errorf("load position polling settings: %w", err)
+	}
 
 	return Config{
 		HTTP:      http,
@@ -45,5 +52,6 @@ func LoadConfig() (Config, error) {
 		Log:       log,
 		App:       app,
 		Telemetry: telemetry,
+		Positions: positions,
 	}, nil
 }

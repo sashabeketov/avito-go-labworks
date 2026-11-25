@@ -13,6 +13,8 @@ import (
 	"github.com/sashabeketov/avito-go-labworks/internal/http/domainerror"
 	"github.com/sashabeketov/avito-go-labworks/internal/http/health"
 	"github.com/sashabeketov/avito-go-labworks/internal/http/middleware"
+	positioncreate "github.com/sashabeketov/avito-go-labworks/internal/http/position/create"
+	positionlist "github.com/sashabeketov/avito-go-labworks/internal/http/position/list"
 	"github.com/sashabeketov/avito-go-labworks/internal/http/trip/create"
 	"github.com/sashabeketov/avito-go-labworks/internal/http/trip/finish"
 	"github.com/sashabeketov/avito-go-labworks/internal/http/trip/get"
@@ -20,16 +22,20 @@ import (
 
 type routerHandler struct {
 	api.Unimplemented
-	create *create.Handler
-	get    *get.Handler
-	finish *finish.Handler
-	health *health.Handler
+	create         *create.Handler
+	get            *get.Handler
+	finish         *finish.Handler
+	createPosition *positioncreate.Handler
+	listPositions  *positionlist.Handler
+	health         *health.Handler
 }
 
 func NewRouter(
 	create *create.Handler,
 	get *get.Handler,
 	finish *finish.Handler,
+	createPosition *positioncreate.Handler,
+	listPositions *positionlist.Handler,
 	health *health.Handler,
 	logger *slog.Logger,
 	tp trace.TracerProvider,
@@ -48,10 +54,12 @@ func NewRouter(
 		metrics,
 	)
 	handler := &routerHandler{
-		create: create,
-		get:    get,
-		finish: finish,
-		health: health,
+		create:         create,
+		get:            get,
+		finish:         finish,
+		createPosition: createPosition,
+		listPositions:  listPositions,
+		health:         health,
 	}
 	return api.HandlerWithOptions(handler, api.ChiServerOptions{
 		BaseRouter: router,
@@ -83,6 +91,14 @@ func (h *routerHandler) FinishTrip(
 	id api.TripId,
 ) {
 	h.finish.Handle(w, r, id)
+}
+
+func (h *routerHandler) CreateTripPosition(w stdhttp.ResponseWriter, r *stdhttp.Request, id api.TripId) {
+	h.createPosition.Handle(w, r, id)
+}
+
+func (h *routerHandler) ListTripPositions(w stdhttp.ResponseWriter, r *stdhttp.Request, id api.TripId) {
+	h.listPositions.Handle(w, r, id)
 }
 
 func (h *routerHandler) Health(w stdhttp.ResponseWriter, r *stdhttp.Request) {

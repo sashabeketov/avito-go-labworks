@@ -40,12 +40,6 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("build application: %w", err)
 	}
-	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.App.ShutdownTimeout)
-		defer cancel()
-		app.Logger.InfoContext(closeCtx, "service stopped")
-		app.Close(closeCtx)
-	}()
 
 	server := &http.Server{
 		Addr:              cfg.HTTP.Addr,
@@ -62,29 +56,29 @@ func run(ctx context.Context) error {
 		serveErr <- server.ListenAndServe()
 	}()
 
+	var listenErr error
+	stopHTTP := false
 	select {
-	case err := <-serveErr:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("HTTP server: %w", err)
+	case listenErr = <-serveErr:
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(
-			context.WithoutCancel(ctx),
-			cfg.App.ShutdownTimeout,
-		)
-		defer cancel()
-
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return errors.Join(
-				fmt.Errorf("shutdown HTTP server: %w", err),
-				server.Close(),
-			)
-		}
-
-		if err := <-serveErr; err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("HTTP server: %w", err)
-		}
-		return nil
+		stopHTTP = true
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.App.ShutdownTimeout)
+	defer cancel()
+	var shutdownErr error
+	if stopHTTP {
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			shutdownErr = errors.Join(fmt.Errorf("shutdown HTTP server: %w", err), server.Close())
+		}
+		listenErr = <-serveErr
+	}
+	if listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("HTTP server: %w", listenErr))
+	}
+	shutdownErr = errors.Join(shutdownErr, app.Close(shutdownCtx))
+	if shutdownErr == nil {
+		app.Logger.InfoContext(shutdownCtx, "service stopped")
+	}
+	return shutdownErr
 }
